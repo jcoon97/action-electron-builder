@@ -35,6 +35,34 @@ const getPlatform = () => {
 };
 
 /**
+ * Determines the package manager that should be used. Currently, supports `npm`,
+ * `pnpm`, and will default to `yarn` if no other could be found
+ */
+const getPackageManager = (pkgRoot) => {
+	const pkgLockPath = join(pkgRoot, "package-lock.json");
+	const pnpmLockPath = join(pkgRoot, "pnpm-lock.yaml");
+
+	if (existsSync(pkgLockPath)) {
+		return {
+			name: "NPM",
+			command: "npm",
+		};
+	}
+
+	if (existsSync(pnpmLockPath)) {
+		return {
+			name: "PNPM",
+			command: "pnpm",
+		};
+	}
+
+	return {
+		name: "Yarn",
+		command: "yarn",
+	};
+};
+
+/**
  * Returns the value for an environment variable (or `null` if it's not defined)
  */
 const getEnv = (name) => process.env[name.toUpperCase()] || null;
@@ -78,11 +106,10 @@ const runAction = () => {
 	const appRoot = getInput("app_root") || pkgRoot;
 
 	const pkgJsonPath = join(pkgRoot, "package.json");
-	const pkgLockPath = join(pkgRoot, "package-lock.json");
+	const pkgManager = getPackageManager(pkgRoot);
 
-	// Determine whether NPM should be used to run commands (instead of Yarn, which is the default)
-	const useNpm = existsSync(pkgLockPath);
-	log(`Will run ${useNpm ? "NPM" : "Yarn"} commands in directory "${pkgRoot}"`);
+	// Determine whether NPM, PNPM, or Yarn should be used to run commands (will default to Yarn)
+	log(`Will run ${pkgManager.name} commands in directory "${pkgRoot}"`);
 
 	// Make sure `package.json` file exists
 	if (!existsSync(pkgJsonPath)) {
@@ -105,16 +132,16 @@ const runAction = () => {
 	// Disable console advertisements during install phase
 	setEnv("ADBLOCK", true);
 
-	log(`Installing dependencies using ${useNpm ? "NPM" : "Yarn"}…`);
-	run(useNpm ? "npm install" : "yarn", pkgRoot);
+	log(`Installing dependencies using ${pkgManager.name}…`);
+	run(`${pkgManager.command} install`, pkgRoot);
 
 	// Run NPM build script if it exists
 	if (skipBuild) {
 		log("Skipping build script because `skip_build` option is set");
 	} else {
 		log("Running the build script…");
-		if (useNpm) {
-			run(`npm run ${buildScriptName} --if-present`, pkgRoot);
+		if (pkgManager.name === "NPM" || pkgManager.name === "PNPM") {
+			run(`${pkgManager.command} run ${buildScriptName} --if-present`, pkgRoot);
 		} else {
 			// TODO: Use `yarn run ${buildScriptName} --if-present` once supported
 			// https://github.com/yarnpkg/yarn/issues/6894
@@ -130,7 +157,7 @@ const runAction = () => {
 	for (let i = 0; i < maxAttempts; i += 1) {
 		try {
 			run(
-				`${useNpm ? "npx --no-install" : "yarn run"} ${cmd} --${platform} ${
+				`${pkgManager.command} run ${cmd} --${platform} ${
 					release ? "--publish always" : ""
 				} ${args}`,
 				appRoot,
